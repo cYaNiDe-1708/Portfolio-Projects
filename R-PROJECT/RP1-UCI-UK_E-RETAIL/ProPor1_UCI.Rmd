@@ -1,0 +1,791 @@
+---
+title: "UCI Online Retail Project "
+author: "Yacine ND"
+date: "December 2025"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+---
+ 
+#PROJECT OVERVIEW
+This project uses the UCI Online Retail dataset with a focus on U.K. based operations. The purpose is to further familiarize with R and its inbuilt tools to generate data-backed conclusions. The workflow covers the full analytics cycle from data cleaning to customer insights, product analysis,and sequential patterns.
+The project spans 4 phases:
+- PHASE 1: Define the business question + KPIs
+- PHASE 2: Data ingestion & cleaning for reliable analysis
+- PHASE 3: Customer life-cycle feature engineering. includes cohort analysis    and customer segmentation/clustering to identify personas   and behaviour     groups
+- PHASE 4: Limited sequential signals; basket intelligence through repeat       customer sequences and stability metrics
+ 
+The analysis leverages R packages and features such as:
+-Data manipulation: dplyr, tidyr, janitor
+-Date and text handling: lubridate, stringr
+-Visualization: ggplot2, scales, ggrepel
+-Clustering and statistical analysis: factoextra, cluster, scaling functions, k-means
+-Reproducibility and reporting: R Markdown (.Rmd), CSV exports
+As the report delves into each phase, the choices made during data exploration and treatment (Phase 2) will be explained. Insights for Phases 3–4 will be provided at the end of each section, supporting recommendations and strategy development.
+
+
+
+## DEFINE THE BUSINESS QUESTIONS + KPIs
+### DATASET INFORMATION
+The UCI dataset is a collection of information on real world transactions from an online retailer. It's content covers details of sales, customers, and products from 2009 to 2011.
+The dataset is provided in raw Excel format and originates from an operational retail environment. As is typical of real-world business data, it contains missing values, inconsistencies, and invalid records that must be identified and documented before any downstream analysis can be performed. The original dataset was stored in an excel file which was then directly loaded into R for complete retention of the data in its original state. 
+
+### BUSINESS QUESTION + KPIs
+This first portfolio project is built around the business question as to "How do customer behaviour and product performance impact revenue and risk in an online retail setting?". Retail data is quite random which often leads to a dataset full of noises. Single purchases are a common occurrence, demand can be episodic, and returns can materially distort apparent revenue performance. Consequentially, not all observed sales activities reflect sustainable or controllable business value. The aforementioned business question seeks insights beyond surface-level sales totals and examines potential behavioural pattern from repeat customers, product performance changes once returns are accounted for and where revenue concentration introduces operational/financial risk. This analysis will be U.K. centric, and as such, recommendations and insights will be tailored to fit the realities of the U.K. online retail industry.   
+The key KPIs are: 
+1- Customer Lifetime Value
+2- Purchase frequency/repeat rate
+3- Return Exposure 
+4- Net Revenue by Product/ category
+5- Revenue Volatility/ Risk flag
+
+
+
+
+
+
+
+# PHASE 1: DATA INGESTION AND CLEANING
+This phase focuses on establishing a reliable, analysis-ready dataset by addressing common data quality issues found in real-world retail transactions. The objectives are to load the raw Excel file, standardize column names, remove duplicates, fix data types, handle missing values, clean text fields, remove outliers, calculate transaction values, flag returns, and export cleaned datasets for downstream analysis. The dataset will also be filtered to only retain U.K. operations. A new CSV file with U.K. centric cleaned data will be used as a base for the rest of the operations. 
+
+## 1.2: MASTER SET UP- LOAD REQUIRED PACKAGES
+Before performing any data operations,all the necessary R packages are loaded . This ensures that the functions used for data cleaning, manipulation, visualization, and clustering are available. Any missing packages are automatically installed. Keeping this as a separate setup block also improves reproducibility and clarity.
+*view Appendix A (Packages & Tooling)
+```{r master_setup, echo=TRUE, message=FALSE, warning=FALSE}
+required_packages <- c(
+  "readxl","readr","dplyr","janitor","lubridate","stringr",
+  "ggplot2","factoextra","cluster","tidyr","scales","ggrepel"
+)
+# Install any missing packages
+missing <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if(length(missing)) install.packages(missing, dependencies = TRUE)
+
+# Load all required packages
+invisible(lapply(required_packages, library, character.only = TRUE))
+```
+
+
+
+## 1.3: DATA INGESTION & CLEANING
+Once the required packages are loaded, the raw transactional data is ingested and transformed into an analysis-ready format. The cleaning process is designed to address common data quality issues often found in operational retail datasets. This will ensure that downstream analysis is both reliable and interpretable.
+
+- Column names are first standardized to enforce consistent naming conventions and   reduce the risk of syntactic errors. Duplicate records are removed to prevent artificial inflation of transaction counts and revenue metrics.
+- Data types are then explicitly corrected to ensure that numerical calculations and time-based operations behave as intended.Records with missing product descriptions are excluded, as these entries cannot be meaningfully categorized  in later product and taxonomy analyses. 
+- Customer identifiers with missing values are retained but explicitly flagged, allowing customer-level metrics to be calculated where possible without discarding valid transactional information.
+- Text fields such as product descriptions and country names are normalized to improve consistency and reduce category fragmentation caused by formatting variations. Extreme unit price values are filtered using an interquartile range (IQR) approach to mitigate the influence of anomalous pricing on revenue-based    metrics, while retaining the majority of valid observations.
+- Finally, transaction-level revenue is calculated, returns are explicitly identified, and sales and return transactions are separated. This structure enables return-adjusted revenue analysis and supports subsequent customer, product, and risk evaluations. The cleaned datasets and a data quality summary are exported to ensure transparency and reproducibility across later analytical   phases.
+
+
+
+### 1.3.1: Output Analysis
+The cleaned dataset is separated into two distinct files: one containing only positive-quantity sales (sales_only.csv) and one containing only returns (returns_only.csv). This separation is intentional for analytical clarity and computational accuracy.The output: 
+- Simplifies customer and product metrics, since Calculating total revenue, average basket size, and repeat purchase behavior is more straightforward when returns are excluded. Returns can distort these metrics if treated together with sales.
+- Enables separate return analysis, as Return behavior itself is a signal of customer or product risk. Having a dedicated returns dataset allows for the calculation of return ratios, return exposure, and operational risk metrics without repeatedly filtering within each analysis step.
+- Improves downstream performance, because Many analyses, such as cohort retention, clustering, and revenue aggregation, assume positive sales. Splitting the datasets avoids repeatedly filtering the main dataset and ensures reproducible calculations.
+The separation is therefore a data modeling convenience that ensures both accuracy and interpretability, while maintaining the ability to recombine datasets if needed for net revenue or risk calculations.
+```{r data_cleaning, echo=TRUE, message=FALSE, warning=FALSE}
+# STEP 1: LOAD DATA
+df <- read_excel("Online Retail.xlsx")
+write.csv(df, "O_R.csv", row.names = FALSE, fileEncoding = "UTF-8")
+
+# STEP 2: CLEAN COLUMN NAMES & REMOVE DUPLICATES
+initial_rows <- nrow(df)
+df <- df %>%
+  clean_names() %>%
+  distinct()
+duplicates_removed <- initial_rows - nrow(df)
+
+# STEP 3: FIX DATA TYPES
+df <- df %>%
+  mutate(
+    invoice_date = as.POSIXct(invoice_date, format = "%Y-%m-%d %H:%M:%S"),
+    quantity = as.numeric(quantity),
+    unit_price = as.numeric(unit_price),
+    customer_id = as.character(customer_id)
+  )
+
+# STEP 4: HANDLE MISSING VALUES
+df <- df %>%
+  filter(!is.na(description)) %>%
+  mutate(missing_customerID = is.na(customer_id))
+
+# STEP 5: CLEAN TEXT FIELDS & FILTER TO UK ONLY
+df <- df %>%
+  mutate(
+    description = str_squish(description) %>% str_to_title(),
+    country = str_squish(country) %>% str_to_title()
+  ) %>%
+  mutate(country = recode(country,
+                          "U.K." = "UK",
+                          "United Kingdom" = "UK")) %>%
+  filter(country == "UK")  # keep UK only
+
+# STEP 6: REMOVE OUTLIERS IN UNIT PRICE
+Q1 <- quantile(df$unit_price, 0.25, na.rm = TRUE)
+Q3 <- quantile(df$unit_price, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+upper <- Q3 + 1.5 * IQR
+lower <- Q1 - 1.5 * IQR
+df <- df %>% filter(unit_price >= lower & unit_price <= upper)
+
+# STEP 7: CREATE TRANSACTION VALUE & RETURN FLAG
+df <- df %>%
+  mutate(
+    transaction_value = quantity * unit_price,
+    return_flag = ifelse(quantity < 0, 1, 0)
+  )
+
+# STEP 8: SEPARATE SALES AND RETURNS
+sales_df <- df %>% filter(quantity > 0)
+returns_df <- df %>% filter(quantity < 0)
+
+# STEP 9: EXPORT CLEANED DATA
+write.csv(df, "cleaned_online_retail_uk.csv", row.names = FALSE)
+write.csv(sales_df, "sales_only_uk.csv", row.names = FALSE)
+write.csv(returns_df, "returns_only_uk.csv", row.names = FALSE)
+
+# STEP 10: DATA QUALITY SUMMARY
+data_quality <- tibble(
+  total_rows = nrow(df),
+  missing_customerID = sum(is.na(df$customer_id)),
+  missing_description = sum(is.na(df$description)),
+  negative_quantity = sum(df$quantity < 0),
+  zero_or_negative_price = sum(df$unit_price <= 0),
+  duplicates_removed = duplicates_removed
+)
+write.csv(data_quality, "data_quality_summary_uk.csv", row.names = FALSE)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# PHASE 2: CUSTOMER LIFECYCLE & PERSONA CLUSTERING
+This section focuses on understanding customer behavior through lifecycle features, cohort analysis, and persona clustering. The goal is to identify high-value, frequent, and risky customers in order to support retention and targeted strategies. The analysis moves from individual transactions to aggregated customer-level insights.
+
+## 2.1: Build Customer Features
+The first step is to aggregate individual transactions into customer-level metrics. These features help in quantifying customer engagement, spending behavior, and risk (e.g., returns). Key metrics include:
+
+- first_purchase / last_purchase is the start and end of a customer’s purchasing history.
+
+- active_days represents total span of engagement which can indicate loyalty.
+
+- avg_days_between is the average interval between purchases, reflecting purchasing regularity.
+
+- total_invoices equals the number of orders which helps in distinguishing one-time vs repeat buyers.
+
+- total_spend / avg_basket_size gives the total contribution and typical order value.
+
+- return_ratio helps uncover the proportion of purchases returned, capturing risk exposure.
+
+These metrics provide the foundation for cohort analysis and persona segmentation.
+
+```{r Build Customer Features , echo=TRUE, message=FALSE, warning=FALSE}
+customer_features <- sales_df %>%
+group_by(customer_id) %>%
+summarise(
+first_purchase = min(invoice_date),
+last_purchase = max(invoice_date),
+active_days = as.numeric(difftime(max(invoice_date), min(invoice_date), units = "days")),
+avg_days_between = ifelse(
+n_distinct(invoice_date) > 1,
+mean(as.numeric(diff(sort(invoice_date))), na.rm = TRUE),
+0
+),
+total_invoices = n_distinct(invoice_no),
+total_spend = sum(transaction_value),
+avg_basket_size = mean(transaction_value),
+return_ratio = mean(quantity < 0),
+.groups = "drop"
+)
+
+customer_features
+
+
+```
+
+### 2.1.1: Customer Table features Summary
+The table generated from the code chunk above links the aforementioned key metrics to the customer IDs in the dataset. results show the averages of those key metrics. this help identify the average customer's spending habits. However, it's still important to take into account the fact that the dataset at hand recounts retail operations which tend to be random due to multiple one time customers. Observations drawn from the results show that: 
+
+- The average customer has an active span of approximately 131 days, while the median customer is active for about 93 days, indicating that while some customers have very long engagement, most have shorter activity periods.
+
+- On average, customers place 4–5 orders, with a median of 2, meaning that many customers are one-time or low-frequency buyers.
+
+- The average total spend per customer is £2,092, but the median is £596, showing a skewed distribution where a small number of high-spending customers disproportionately drive revenue.
+
+- The average basket size is roughly £64, which is consistent across the median, suggesting most purchases cluster around this typical order value.
+
+- The average interval between purchases appears extremely large (~252,000 days). This is clearly a data artifact, likely due to customers with only one purchase (difference undefined), so it should be treated with caution.
+Returns are generally negligible, with an average return ratio of 0% and a maximum return ratio of 0%, indicating very few customers returned products in the cleaned sales dataset.
+
+```{r Customer Features Summary , echo=TRUE, message=FALSE, warning=FALSE}
+customer_features$first_purchase <- as.Date(customer_features$first_purchase)
+customer_features$last_purchase  <- as.Date(customer_features$last_purchase)
+
+summary_stats <- customer_features %>%
+summarise(
+avg_active_days = mean(active_days, na.rm = TRUE),
+median_active_days = median(active_days, na.rm = TRUE),
+avg_total_invoices = mean(total_invoices, na.rm = TRUE),
+median_total_invoices = median(total_invoices, na.rm = TRUE),
+avg_total_spend = mean(total_spend, na.rm = TRUE),
+median_total_spend = median(total_spend, na.rm = TRUE),
+avg_basket_size = mean(avg_basket_size, na.rm = TRUE),
+median_basket_size = median(avg_basket_size, na.rm = TRUE),
+avg_days_between = mean(avg_days_between, na.rm = TRUE),
+median_days_between = median(avg_days_between, na.rm = TRUE),
+avg_return_ratio = mean(return_ratio, na.rm = TRUE),
+max_return_ratio = max(return_ratio, na.rm = TRUE)
+)
+
+summary_stats
+
+```
+
+
+## 2.2: COHORT ASIGNMENT
+Customers were grouped into cohorts based on the month of their first purchase, allowing for the study of retention trends over time as well as pattern detection for repeat engagement. Each customer is tagged with the month they made their initial purchase, and every subsequent purchase is mapped to its corresponding month. Aggregating these counts produces both the cohort_data table, which records active customers per cohort per month, and the cohort_matrix, which lays out cohorts as rows, months as columns, and active customer counts as values for easier comparison.
+
+An Examination of the December 2010 cohort shows that 809 customers made their first purchase in that month, but only 286 remained active in January 2011, and by December 2011, just 217 were still active. Similar patterns emerge across other cohorts, with sharp declines after the first month and gradual tapering over time. For instance, the January 2011 cohort starts with 355 customers, but by December 2011, only 43 remain active. This indicates that the dataset is dominated by one-time or short-term buyers, a characteristic consistent with the UCI Online Retail dataset, where retail behavior is largely opportunistic and random.
+
+The cohort matrix reinforces these observations, showing that most cohorts experience steep early drop-offs however, the total number of retained customers varies by month of acquisition. Cohorts formed during holiday periods such as December are initially larger, reflecting seasonal spikes in new customer acquisition. 
+
+Overall, the data suggest that retention is generally low, emphasizing the challenge of converting first-time buyers into repeat customers and highlighting the importance of timing campaigns strategically to capture seasonal demand.
+
+```{r  Customer Cohorts , echo=TRUE, message=FALSE, warning=FALSE}
+
+# STEP 2: CREATE COHORTS
+
+customer_features <- customer_features %>%
+mutate(first_purchase_month = floor_date(first_purchase, "month"))
+
+cohort_data <- sales_df %>%
+left_join(
+customer_features %>% select(customer_id, first_purchase_month),
+by = "customer_id"
+) %>%
+mutate(purchase_month = floor_date(invoice_date, "month")) %>%
+group_by(first_purchase_month, purchase_month) %>%
+summarise(active_customers = n_distinct(customer_id), .groups = "drop")
+
+cohort_matrix <- cohort_data %>%
+pivot_wider(
+names_from = purchase_month,
+values_from = active_customers,
+values_fill = 0
+)
+
+```
+
+
+### 2.2.1: Cohort Retention Visualization
+The cohort retention plot showcases the number of active customers in each month grouped by their first purchase cohort.This visual is a representation of the above mentioned cohort assignment metrics.Each line represents a cohort, with the x-axis showing the purchase month and the y-axis the number of active customers. The graph below shows that: 
+- Most cohorts exhibit a sharp decline immediately after the first month, highlighting that a majority of customers are one-time buyers. For instance, the December 2010 cohort drops from 809 to 286 active customers in January 2011.
+- A smaller fraction of customers continues to purchase over time, forming a long-tail segment. December 2010 retains 217 customers (~27%) after one year.
+
+- Seasonal spikes are evident as shown by cohorts acquired in high-traffic months. December for instance, starts larger than others, emphasizing the influence of seasonality on acquisition.
+
+Overall, retention diminishes steadily, re-confirming that repeat engagement is limited in this dataset.
+
+### 2.2.2 Business Insights- Cohort specific
+Cohort-specific analysis reveals that early engagement is critical, as retention drops sharply after initial purchase. Strategies that target customers immediately following acquisition are likely to be more effective. Additionally, seasonal acquisition trends suggest that campaigns timed around peak months, such as holidays, can maximize initial customer capture. Finally, the observed variability in retention across cohorts underscores the need for tailored retention approaches, rather than uniform, one-size-fits-all strategies.
+```{r  Customer Cohorts Visualization , echo=TRUE, message=FALSE, warning=FALSE}
+ggplot(cohort_data,
+aes(x = purchase_month,
+y = active_customers,
+color = first_purchase_month)) +
+geom_line() +
+labs(
+title = "Customer Cohort Retention Over Time (UK)",
+x = "Purchase Month",
+y = "Active Customers"
+) +
+theme_minimal()
+
+```
+
+## 2.3: PERSONA CLUSTERING
+Customer behavior is segmented into four distinct personas using k-means clustering based on total spend, total invoices, average basket size, return ratio, and active days. These metrics capture revenue contribution, purchasing frequency, typical order value, operational risk from returns, and engagement duration. Standardization ensures no single metric dominates the clustering process.The resulting persona clusters are as follows:
+
+Cluster 1 – High-value frequent buyers: Customers with above-average spend and frequent purchases. Average total spend is ~£4,500, with 12 invoices and a basket size around £375. This segment represents the most loyal and revenue-generating customers.
+
+Cluster 2 – Occasional high-spend buyers: These customers make fewer purchases but with high-value orders. Average spend is ~£2,100, invoices are 3, and basket size ~£700. They provide significant revenue intermittently.
+
+Cluster 3 – High-risk returners: Characterized by elevated return ratios (~0.25). Their spend and basket size are moderate, but operational risks from returns are notable, requiring monitoring.
+
+Cluster 4 – Short-term low-value buyers: Low engagement, spend (~£300), 1–2 invoices, and basket size ~£60. This is the largest segment, consistent with opportunistic, one-off purchases typical in the UCI Online Retail dataset.
+
+The k-means clustering highlights clear separation between personas, confirming that behavioral patterns are distinct. Tight ellipses around Cluster 1 indicate homogeneous, predictable behavior, while some overlap between Clusters 2 and 4 suggests transitional customers who could potentially be influenced through targeted campaigns.
+
+```{r  Customer Clustering , echo=TRUE, message=FALSE, warning=FALSE}
+cluster_data <- customer_features %>%
+select(
+total_spend,
+total_invoices,
+avg_basket_size,
+return_ratio,
+active_days
+) %>%
+mutate(
+across(
+everything(),
+~ ifelse(is.na(.) | is.nan(.) | is.infinite(.), 0, .)
+)
+)
+
+zero_var_cols <- sapply(cluster_data, function(x) sd(x) == 0)
+if (any(zero_var_cols)) {
+cluster_data <- cluster_data[, !zero_var_cols]
+}
+
+cluster_scaled <- scale(cluster_data)
+
+set.seed(123)
+kmeans_res <- kmeans(cluster_scaled, centers = 4, nstart = 25)
+
+customer_features$persona <- as.factor(kmeans_res$cluster)
+```
+
+
+### 2.3.1: Customer Cluster Visualization 
+The cluster plot visualizes the four personas in multi-dimensional space. Ellipses indicate cluster boundaries and variability. tight ellipses suggest homogeneity, while overlapping areas highlight potential transitional customers.These visual insights help identify which clusters to prioritize for retention campaigns, cross-selling opportunities, or risk management.
+### 2.3.2: Business insights- Cluster specific
+Cluster 1: Prioritize retention through loyalty programs to maximize repeat revenue.
+Cluster 2: Use seasonal promotions or incentives to increase purchase frequency.
+Cluster 3: Monitor returns and manage operational risks to reduce costs.
+Cluster 4: Apply low-cost engagement strategies.Broad campaigns are unlikely to be efficient due to the predominance of casual shoppers.
+
+```{r  Customer Clustering , echo=TRUE, message=FALSE, warning=FALSE}
+# K-mean persona cluster visualization
+fviz_cluster(
+kmeans_res,
+data = cluster_scaled,
+geom = "point",
+ellipse.type = "convex",
+main = "Customer Persona Clusters (UK)"
+)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# PHASE 3: PRODUCT TAXONOMY & RETURN-ADJUSTED PERFORMANCE
+This phase evaluates products, assigns them into categories, and examines revenue after accounting for returns. The goal is to identify high-performing products, risky items, and spending patterns across customer personas.
+
+## 3.1: CLEAN PRODUCT DESCRIPTIONS + ASSIGN PRODUCT CATEGORIES + MERGE CUSTOMER PERSONAS
+- Product descriptions are normalized by removing punctuation, converting to lowercase, stripping whitespace, and removing numeric codes. This ensures consistent categorization in subsequent steps.
+
+- Products are then categorized into broad groups such as Gifts, Kitchenware, Home Décor, Stationery, Seasonal, Accessories, and Other. This allows for category-level performance analysis.
+
+- Finally,  persona information are merged in order to link product purchases with customer segments. This helps in analyzing which personas drive revenue per category
+
+``` {r Data_Prep_for_Phase3, echo=TRUE, message=FALSE, warning=FALSE}
+#CLEAN PRODUCT DESCRIPTION
+sales_df <- sales_df %>%
+mutate(
+description_clean = description %>%
+str_to_lower() %>%
+str_replace_all("[[:punct:]]", " ") %>%
+str_squish() %>%
+str_replace_all("\b[0-9]{2,}\b", "")
+)
+
+#PRODUCT CATEGORIZATION
+sales_df <- sales_df %>%
+mutate(
+product_category = case_when(
+str_detect(description_clean, "gift|present|card") ~ "Gifts",
+str_detect(description_clean, "kitchen|cook|utensil") ~ "Kitchenware",
+str_detect(description_clean, "home|decor|cushion|lamp") ~ "Home Décor",
+str_detect(description_clean, "pen|notebook|stationery|diary") ~ "Stationery",
+str_detect(description_clean, "christmas|holiday|seasonal") ~ "Seasonal",
+str_detect(description_clean, "bag|scarf|hat|accessory") ~ "Accessories",
+TRUE ~ "Other"
+)
+)
+
+#MERGING CUSTOMER PERSONAS
+merged_view <- sales_df %>%
+left_join(
+customer_features %>% select(customer_id, persona),
+by = "customer_id"
+)
+
+
+```
+
+
+
+
+## 3.2: PRODUCT METRICS
+This section calculates product-level performance metrics that account for both revenue contribution and customer behaviour, particularly returns. By combining revenue and risk indicators, we can assess which products are true value drivers versus those that inflate revenue but introduce risk, directly tying to KPIs such as Net Revenue, Return Exposure, and Revenue Volatility.
+The key metrics are:
+
+- Gross revenue: It captures the total sales value of a product. While it shows initial customer demand, gross revenue can overstate performance if returns are significant. Comparing gross revenue to net revenue highlights products that appear successful but retain limited economic value.
+
+- Refunded revenue: It quantifies the revenue lost due to returns. This introduces a behavioural risk dimension, showing products that erode revenue because of customer dissatisfaction or expectation mismatch. High refunded revenue signals operational or product-quality concerns.
+
+- Net revenue: It represents the actual retained revenue after returns. Products with strong net revenue are reliable revenue contributors, while those with high gross but low net revenue indicate hidden financial risks. This metric ties directly to the Net Revenue KPI.
+
+- Return rate: This is the proportion of sales value refunded which reflects risk exposure. Elevated return rates indicate products that may require operational attention or reassessment of positioning and marketing strategies.
+
+- Revenue volatility: This is the standard deviation of transaction values for a product. High volatility signals unstable revenue streams often caused by irregular purchasing patterns, seasonality, or large one-off orders. This links to the Revenue Volatility KPI, informing planning and forecasting.
+
+- Total quantity sold: It contextualizes revenue by volume. High-quantity, low-value products may appear important but contribute little to net revenue, whereas low-quantity, high-value products are often premium or high-retention items.
+- Stock code granularity: It represents each product’s unique identifier which allows the tracking of performance and returns at the most detailed level. Repeated issues for a stock code can flag operational or quality risks, aligning with the Return Exposure KPI.
+
+```{r Product_Metrics, echo=TRUE, message=FALSE, warning=FALSE}
+product_metrics <- merged_view %>%
+group_by(stock_code, description_clean, product_category) %>%
+summarise(
+gross_revenue = sum(transaction_value[quantity > 0], na.rm = TRUE),
+refunded_revenue = abs(sum(transaction_value[quantity < 0], na.rm = TRUE)),
+net_revenue = gross_revenue - refunded_revenue,
+return_rate = ifelse(
+gross_revenue > 0,
+refunded_revenue / gross_revenue,
+0
+),
+revenue_volatility = sd(transaction_value, na.rm = TRUE),
+total_quantity = sum(quantity),
+.groups = "drop"
+)
+product_metrics
+```
+
+### 3.2.1: Product Metrics Summary
+
+This summary depicts the distribution of product level metrics.It helps understand typical performance, risk, and variability. It also gives a statistical foundation for conclusions about revenue contribution and operational risk. Results show that: 
+
+- The average product generates £1,882.82 in net revenue, but the median is much lower (£440.95), indicating a small number of high-performing products dominate revenue.
+
+- Refunded revenue and return rates are zero, meaning returns do not materially affect net revenue for most products — returns are not a major source of risk in this dataset.
+
+- Revenue volatility is generally low (avg 23.76), but some products are extremely volatile (max 5,110.68), which could affect planning or inventory management.
+
+- Quantity sold varies widely, with most products selling around 1,132 units on average, but a few high-volume items reaching nearly 81,000 units.
+
+```{r Product_Metrics_Summary, echo=TRUE, message=FALSE, warning=FALSE}
+# Summary statistics for product metrics
+product_metrics_summary <- product_metrics %>%
+summarise(
+avg_gross_revenue = mean(gross_revenue, na.rm = TRUE),
+median_gross_revenue = median(gross_revenue, na.rm = TRUE),
+avg_refunded_revenue = mean(refunded_revenue, na.rm = TRUE),
+median_refunded_revenue = median(refunded_revenue, na.rm = TRUE),
+avg_net_revenue = mean(net_revenue, na.rm = TRUE),
+median_net_revenue = median(net_revenue, na.rm = TRUE),
+avg_return_rate = mean(return_rate, na.rm = TRUE),
+max_return_rate = max(return_rate, na.rm = TRUE),
+avg_revenue_volatility = mean(revenue_volatility, na.rm = TRUE),
+max_revenue_volatility = max(revenue_volatility, na.rm = TRUE),
+avg_total_quantity = mean(total_quantity, na.rm = TRUE),
+max_total_quantity = max(total_quantity, na.rm = TRUE)
+)
+product_metrics_summary
+```
+
+
+
+
+
+
+
+## 3.3: CATEGORY METRICS
+This section aggregates product-level metrics by category to understand which groups generate the most net revenue and which are exposed to return risk. By examining categories rather than individual products, we can make strategic decisions about inventory, marketing, and product focus. The analysis ties directly to KPIs such as Net Revenue, Return Exposure, and Revenue Volatility.
+Results show the following:
+
+- Net Revenue Contribution: Categories such as Gifts and Home Décor generate the highest net revenue, identifying them as strategic value drivers for the business.
+
+- Return Risk: Most categories exhibit negligible refunded revenue and return rates, suggesting that returns are not a major source of financial risk in this dataset.
+
+- Revenue Stability: Average revenue volatility is generally low across categories, but some categories have higher variability, likely due to seasonal spikes or irregular purchasing patterns. This informs inventory planning and promotional timing.
+
+Strategic Implications: By combining net revenue, return exposure, and volatility, the business can prioritize categories that consistently drive value while monitoring those with unpredictable performance.
+
+```{r Category_Metrics, echo=TRUE, message=FALSE, warning=FALSE}
+category_metrics <- product_metrics %>%
+group_by(product_category) %>%
+summarise(
+total_gross_revenue = sum(gross_revenue),
+total_refunded_revenue = sum(refunded_revenue),
+total_net_revenue = sum(net_revenue),
+avg_return_rate = mean(return_rate),
+avg_revenue_volatility = mean(revenue_volatility, na.rm = TRUE),
+.groups = "drop"
+)
+category_metrics
+```
+
+
+
+
+
+
+
+## 3.4: VISUALIZATION, INTERPRETATION & INSIGHTS
+### 3.4.1 :Category Net Revenue 
+The bar chart displays the net revenue generated by each product category, arranged from lowest to highest. Each bar represents the total net revenue for a category, allowing direct visual comparison. Categories such as Gifts and Home Décor stand out with the longest bars, indicating they contribute the largest share of net revenue. In contrast, categories like Stationery and Accessories have shorter bars, showing a smaller revenue contribution. The chart highlights the unequal distribution of revenue across categories and visually identifies which product groups are dominant in terms of financial performance.
+INSIGHTS:
+- Categories with low net revenue may either have limited demand or be prone to returns (though in this dataset return rates are minimal).
+- This visualization helps the business allocate resources to maximize profitability, focusing on the categories that deliver the most retained value.
+```{r Net_Revenue_visualization, echo=TRUE, message=FALSE, warning=FALSE}
+ggplot(
+category_metrics,
+aes(
+x = reorder(product_category, total_net_revenue),
+y = total_net_revenue
+)
+) +
+geom_col(fill = "steelblue") +
+coord_flip() +
+labs(
+title = "Net Revenue by Product Category (UK)",
+x = "Product Category",
+y = "Net Revenue (£)"
+) +
+theme_minimal() +
+scale_y_continuous(labels = scales::comma)
+```
+
+
+### 3.4.2: MONTHLY REVENUE DISTRIBUTION
+The boxplot illustrates the variation in monthly revenue for each product category. Each box shows the interquartile range (25th to 75th percentile), with the median marked by a line inside the box. Whiskers extend to capture typical ranges, while dots outside the whiskers indicate outliers or unusually high/low months. For instance, categories such as Seasonal and Stationery have wider boxes and longer whiskers, reflecting greater variability in monthly revenue. Conversely, Home Décor displays narrower boxes, indicating more consistent month-to-month revenue. This visualization effectively communicates both central tendency and variability, making it easier to compare revenue stability across product categories.
+INSIGHTS: 
+- Categories like Seasonal or Stationery may exhibit wide revenue ranges, reflecting peaks during specific periods (e.g., holidays, back-to-school).
+
+- Stable categories, such as Home Décor or Gifts, show narrow distributions, suggesting predictable revenue streams.
+
+- Identifying volatile categories helps the business plan inventory, staffing, and promotions, reducing stockouts or overstock risks.
+```{r Revenue_distribution, echo=TRUE, message=FALSE, warning=FALSE}
+monthly_rev <- merged_view %>%
+mutate(month = floor_date(invoice_date, "month")) %>%
+group_by(month, product_category) %>%
+summarise(monthly_revenue = sum(transaction_value, na.rm = TRUE), .groups = "drop")
+
+ggplot(monthly_rev, aes(x = product_category, y = monthly_revenue)) +
+geom_boxplot(fill = "lightgreen") +
+coord_flip() +
+labs(title = "Monthly Revenue Distribution by Category", x = "Product Category", y = "Monthly Revenue (£)") +
+theme_minimal() +
+scale_y_continuous(labels = scales::comma)
+```
+
+### 3.4.3 : PERSONA PURCHASE PATTERNS
+The heatmap shows total spend by each customer persona across product categories. The x-axis represents personas, and the y-axis represents product categories, with the fill color intensity indicating total spend. Darker tiles correspond to higher spending. For some categories, such as Gifts, spending is concentrated in one or two personas, as indicated by darker tiles, whereas other categories show more evenly distributed spending across personas. The heatmap allows a quick visual assessment of which customer segments drive revenue in each category and highlights differences in purchasing behaviour among personas.
+INSIGHTS: 
+- Certain personas dominate revenue in specific categories, e.g., high-value, frequent buyers driving Home Décor sales, while occasional buyers may concentrate on Gifts.
+
+- This reveals which customer segments are most profitable per category, informing targeted marketing, cross-selling, and retention campaigns.
+
+- Categories with diverse persona engagement offer growth opportunities through personalized promotions, while categories dominated by a single persona may benefit from loyalty or upselling strategies.
+
+```{r Persona_Purchase_Patterns, echo=TRUE, message=FALSE, warning=FALSE}
+persona_pref <- merged_view %>%
+group_by(persona, product_category) %>%
+summarise(total_spend = sum(transaction_value, na.rm = TRUE), .groups = "drop")
+
+ggplot(persona_pref, aes(x = persona, y = product_category, fill = total_spend)) +
+geom_tile() +
+scale_fill_gradient(low = "white", high = "steelblue") +
+labs(title = "Purchase Patterns by Persona and Category", x = "Persona Cluster", y = "Product Category", fill = "£ Spend") +
+theme_minimal()
+```
+
+# PHASE 4 — LIMITED SEQUENTIAL SIGNALS
+This phase examines whether repeat customers exhibit predictable, sequential purchasing patterns. The goal is to understand if customer demand is consistent enough to support forecasting, automation, or targeted campaigns, or if it is largely opportunistic.
+
+## 4.1: Build & Qualify Customer-Purchase Sequences
+A sequential view of customer behaviour is constructed by ordering each customer’s transactions chronologically and calculating the number of days between consecutive purchases. These inter-purchase gaps represent the core signal used to assess whether purchasing behaviour follows a consistent temporal pattern or occurs opportunistically.
+
+To ensure that sequential patterns reflect meaningful repeat behaviour rather than coincidence, the analysis is restricted to true repeat customers (defined as customers with at least three purchases) . This filtering step is essential from a statistical perspective, as sequential metrics (such as medians and variability of purchase gaps) require multiple observations per customer to be interpretable.
+
+The resulting dataset represents customers for whom behavioural predictability can be reasonably evaluated, forming the basis for assessing whether demand is stable enough to support automation or forecasting.
+
+### 4.1.1: Interpretation+ Insights
+Each row in the output represents a single purchase event for a repeat customer, augmented with sequential context:
+- Purchase_order establishes the position of each transaction within a customer’s purchase history, enabling sequence-level analysis.
+
+- Next_purchase_gap_days measures the time until the next purchase, capturing the temporal regularity of customer behaviour.
+
+Customers with fewer than three purchases are excluded, ensuring that observed gaps reflect sustained repeat behaviour rather than isolated events.This structure allows subsequent metrics to distinguish between consistent repeat purchasing and irregular, episodic demand. This directly address the business question of whether customer behaviour is predictable or opportunistic.
+```{r Customer-purchase_Sequences, echo=TRUE, message=FALSE, warning=FALSE}
+repeat_customers <- sales_df %>%
+arrange(customer_id, invoice_date) %>%
+group_by(customer_id) %>%
+mutate(
+purchase_order = row_number(),
+next_purchase_gap_days = as.numeric(
+difftime(lead(invoice_date), invoice_date, units = "days")
+)
+) %>%
+filter(n() >= 3) %>%   # qualify to true repeat customers
+ungroup()
+
+repeat_customers
+```
+
+
+
+
+##4.2: Sequential Stability Metrics
+Using the qualified repeat-customer sequences, inter-purchase behaviour is summarised using three stability indicators. The observed results indicate an important structural characteristic of the dataset rather than strong behavioural regularity.
+- Median gap between purchases = 0 days. A median gap of zero indicates that, for at least half of observed purchase-to-purchase transitions, the time between consecutive purchases is zero days. This typically occurs when customers place multiple transactions on the same calendar day, often within the same shopping session or invoice window.This does not imply daily repeat purchasing over time, but rather transactional clustering, where repeat activity happens within a single visit rather than across multiple occasions.
+
+- Interquartile range (IQR) of gaps = 0 days.An IQR of zero confirms that the middle 50% of inter-purchase gaps are also zero. This indicates very low dispersion in short-term gaps, reinforcing the interpretation that repeat transactions are tightly concentrated within the same day rather than spread across time. From a behavioural standpoint, this reflects in-session purchasing behaviour, not stable, time-based repeat cycles.
+
+- Percentage of gaps ≤ 30 days = 0.98. A value of 0.98 means that 98% of observed gaps fall within 30 days. While this initially suggests frequent repeat behaviour, in context it is largely driven by same-day or near-same-day transactions rather than evenly spaced monthly repurchases. This indicates that although customers often make multiple purchases close together, these clusters do not translate into predictable long-term repeat intervals.
+
+```{r Sequential_Stability_Metrics, echo=TRUE, message=FALSE, warning=FALSE}
+sequential_signal <- repeat_customers %>%
+summarise(
+median_gap_days = median(next_purchase_gap_days, na.rm = TRUE),
+gap_iqr = IQR(next_purchase_gap_days, na.rm = TRUE),
+pct_consistent_gaps = mean(next_purchase_gap_days <= 30, na.rm = TRUE)
+)
+sequential_signal
+
+```
+
+###4.2.1: Insight Table (Export)
+The sequential metrics show that repeat purchasing behaviour exists, but it is dominated by short-term transaction clustering rather than stable, time-based cycles. Customers tend to make multiple purchases in close succession, yet this behaviour does not persist in a predictable rhythm over time.
+This limits the usefulness of calendar-driven forecasting or automation and confirms that demand is primarily opportunistic rather than cyclical.
+```{r Insight_Table, echo=TRUE, message=FALSE, warning=FALSE}
+phase4_insight <- tibble(
+interpretation = "Sequential behaviour exists only in narrow, episodic pockets.",
+implication = "Retail demand is predominantly opportunistic, not predictable.",
+actionability = "Avoid calendar-based automation beyond short tactical windows."
+)
+write.csv(phase4_insight, "phase4_sequential_insight_uk.csv", row.names = FALSE)
+phase4_insight
+```
+
+------------------------------------------------------------------------
+# Appendix A: Packages & Tooling
+
+This appendix provides an overview of the R packages used throughout the analysis and their functional roles within the analytical workflow. The selection prioritizes reproducibility, clarity, and alignment with standard data analytics practices.
+
+## Data Ingestion
+- **readxl**: Used to import the raw UCI Online Retail dataset from Excel format (.xlsx) directly into R. This enables analysis to begin from the original operational data source without requiring external preprocessing.
+
+- **readr**: Provides efficient functions for reading and writing flat files such as CSVs. While base R functions are used in this project, readr is included to support scalable, tidyverse-consistent data input/output in downstream workflows.
+
+
+## Data Cleaning & Manipulation
+- **dplyr**: Forms the backbone of data manipulation throughout the project. It is used for filtering records, removing duplicates, creating derived variables, grouping data, and producing summary tables. Its pipeline syntax improves readability and reproducibility.
+
+- **janitor**: Used to standardize column names at the point of ingestion via clean_names(). This ensures consistent naming conventions and reduces the risk of errors in downstream analysis.
+
+- **tidyr**: Supports data reshaping operations, particularly in cohort analysis where data must be transformed between long and wide formats.
+
+
+
+## Date & Text Processing
+- **lubridate**: Facilitates date parsing and time-based calculations. It is used for cohort assignment, lifecycle feature engineering, and computing gaps between customer purchases.
+
+- **stringr**: Provides consistent and vectorized string manipulation functions. It is used to clean product descriptions, normalize text fields, and apply pattern matching for product categorization.
+
+
+## Visualization
+- **ggplot2**: Used to construct all visual outputs in the analysis, including cohort retention curves, revenue distributions, persona-category heatmaps, and risk maps. The grammar-of-graphics approach ensures consistency across visualizations
+
+- **scales**: Enhances plot readability by formatting numeric axes, particularly for revenue values displayed in currency or comma-separated form.
+
+- **ggrepel**: Improves the legibility of labeled plots by preventing text overlap, especially in scatter plots used for risk and performance mapping.
+
+
+## Clustering & Multivariate Analysis
+- **cluster**: Provides supporting functionality for clustering workflows. It complements base R clustering methods used in customer persona segmentation.
+
+- **factoextra**: Used to visualize clustering results through functions such as fviz_cluster(). This allows abstract clustering output to be presented in an interpretable, business-facing format.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
