@@ -1,5 +1,5 @@
 ---
-title: "UCI Online Retail Project "
+title: 'UCI Online Retail Project '
 author: "Yacine ND"
 date: "December 2025"
 output:
@@ -7,6 +7,9 @@ output:
     toc: true
     toc_depth: 2
     number_sections: true
+  pdf_document:
+    toc: true
+    toc_depth: '2'
 ---
  
 #PROJECT OVERVIEW
@@ -376,7 +379,7 @@ Cluster 2: Use seasonal promotions or incentives to increase purchase frequency.
 Cluster 3: Monitor returns and manage operational risks to reduce costs.
 Cluster 4: Apply low-cost engagement strategies.Broad campaigns are unlikely to be efficient due to the predominance of casual shoppers.
 
-```{r  Customer Clustering , echo=TRUE, message=FALSE, warning=FALSE}
+```{r  Customer Clustering_Visual , echo=TRUE, message=FALSE, warning=FALSE}
 # K-mean persona cluster visualization
 fviz_cluster(
 kmeans_res,
