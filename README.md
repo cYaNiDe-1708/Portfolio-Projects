@@ -1,7 +1,7 @@
 
-__________________
+_____________________
 CURRENTLY WORKING ON:
-__________________
+---------------------
 A SQL-based project analysing London Underground activity using SQLite. This project will be completed with a written report outlining analytical practices and a Tableau presentation designed to communicate insights clearly to a non-technical audience.
 
 
