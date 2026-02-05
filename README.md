@@ -2,7 +2,7 @@
 _____________________
 CURRENTLY WORKING ON:
 ---------------------
-Reviewing/Polishing Current Projects and Looking for a new dataset to work with. Excel will be used as well. 
+Reviewing/Polishing Current Projects and Looking for a new dataset to work with. Excel will be used. 
 
 
 
